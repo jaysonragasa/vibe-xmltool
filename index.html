@@ -151,6 +151,7 @@
           margin-right: 4px;
           transition: transform 0.15s ease;
           flex-shrink: 0;
+          cursor: pointer;
       }
       .node-wrapper:not(.collapsed) .toggler { transform: rotate(90deg); }
 
@@ -312,11 +313,22 @@
                         this.state.monacoEditor = monaco.editor.create(document.getElementById('editor'), {
                             language: 'xml',
                             theme: savedTheme === 'light' ? 'vs' : 'vs-dark',
-                            automaticLayout: true,
+                            automaticLayout: false, // Set to false to manually handle layout
                             wordWrap: savedWordWrap ? 'on' : 'off',
                             minimap: { enabled: false },
                             scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 }
                         });
+
+                        // Manually handle layout changes to avoid ResizeObserver errors
+                        const editorContainer = this.els.editorContainer;
+                        const debouncedLayout = this.utils.debounce(() => {
+                            if (this.state.monacoEditor) {
+                                this.state.monacoEditor.layout();
+                            }
+                        }, 50);
+                        const resizeObserver = new ResizeObserver(debouncedLayout);
+                        resizeObserver.observe(editorContainer);
+
                         this.state.monacoEditor.onDidChangeModelContent(this.utils.debounce(() => this.handlers.handleUpdateFromEditor(), 400));
                         this.loadSampleData();
                         this.applyTheme(savedTheme);
@@ -514,6 +526,7 @@
                         this.container = XMLTool.els.treeRoot;
                         this.container.innerHTML = '';
                         let count = 0;
+                        const tagOccurrences = {};
 
                         const createNodeElement = (xmlNode) => {
                             count++;
@@ -534,9 +547,15 @@
                             }
 
                             if (xmlNode.nodeType === Node.ELEMENT_NODE) {
+                                const tagName = xmlNode.nodeName;
+                                const occurrenceIndex = (tagOccurrences[tagName] || 0);
+                                tagOccurrences[tagName] = occurrenceIndex + 1;
+                                nodeHeader.dataset.tagName = tagName;
+                                nodeHeader.dataset.occurrence = occurrenceIndex;
+
                                 const tagSpan = document.createElement('span');
                                 tagSpan.className = 'node-tag';
-                                tagSpan.textContent = `<${xmlNode.nodeName}`;
+                                tagSpan.textContent = `<${tagName}`;
                                 nodeHeader.appendChild(tagSpan);
                                 
                                 if (xmlNode.attributes.length > 0) {
@@ -566,6 +585,13 @@
                             }
 
                             nodeWrapper.appendChild(nodeHeader);
+                            
+                            // Add listener to the whole node for selection
+                            nodeHeader.addEventListener('click', () => {
+                                if (xmlNode.nodeType === Node.ELEMENT_NODE) {
+                                    this.selectNodeInEditor(nodeHeader.dataset.tagName, parseInt(nodeHeader.dataset.occurrence, 10));
+                                }
+                            });
 
                             if (isExpandable) {
                                 nodeWrapper.classList.add('collapsed');
@@ -575,7 +601,15 @@
                                     if (childElement) childrenList.appendChild(childElement);
                                 });
                                 nodeWrapper.appendChild(childrenList);
-                                nodeHeader.addEventListener('click', () => nodeWrapper.classList.toggle('collapsed'));
+                                
+                                // Add click listener to the expander icon ONLY
+                                const toggler = nodeHeader.querySelector('.toggler');
+                                if(toggler) {
+                                    toggler.addEventListener('click', (e) => {
+                                        e.stopPropagation();
+                                        nodeWrapper.classList.toggle('collapsed');
+                                    });
+                                }
                             }
                             return nodeWrapper;
                         };
@@ -588,6 +622,24 @@
                         }
                         XMLTool.els.nodeCount.textContent = count > 0 ? count - 1 : 0; // Adjust for root
                     },
+                    selectNodeInEditor(tagName, occurrenceIndex) {
+                        const { monacoEditor } = XMLTool.state;
+                        if (!monacoEditor) return;
+
+                        const model = monacoEditor.getModel();
+                        if (!model) return;
+
+                        const searchString = `<${tagName}`;
+                        const matches = model.findMatches(searchString, true, false, true, null, true);
+
+                        if (matches[occurrenceIndex]) {
+                            const range = matches[occurrenceIndex].range;
+                            const selectionRange = new monaco.Range(range.startLineNumber, range.startColumn + 1, range.startLineNumber, range.startColumn + 1 + tagName.length);
+                            monacoEditor.revealRangeInCenter(selectionRange, monaco.editor.ScrollType.Smooth);
+                            monacoEditor.setSelection(selectionRange);
+                            monacoEditor.focus();
+                        }
+                    }
                 },
                 visualization: {
                     show(vizType) {
