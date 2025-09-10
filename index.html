@@ -512,7 +512,7 @@
                     formatXml(xmlDoc) {
                         let xmlString = new XMLSerializer().serializeToString(xmlDoc);
                         let formatted = '', indent = '';
-                        const tab = '  ';
+                        const tab = '\t';
                         xmlString.split(/>\s*</).forEach(node => {
                             if (node.match(/^\/\w/)) indent = indent.substring(tab.length);
                             formatted += indent + '<' + node + '>\r\n';
