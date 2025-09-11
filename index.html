@@ -16,6 +16,7 @@
         --accent: #06b6d4;
         --success: #10b981;
         --danger: #ef4444;
+        --warning: #f59e0b;
         --glass: rgba(255, 255, 255, 0.03);
         --border-light: rgba(255, 255, 255, 0.04);
         --border-dashed: rgba(255, 255, 255, 0.03);
@@ -38,6 +39,7 @@
         --accent: #0891b2;
         --success: #059669;
         --danger: #dc2626;
+        --warning: #d97706;
         --glass: rgba(0, 0, 0, 0.03);
         --border-light: rgba(0, 0, 0, 0.08);
         --border-dashed: rgba(0, 0, 0, 0.1);
@@ -131,9 +133,24 @@
         overflow-y: auto;
         position: relative;
       }
-      .node { padding: 4px 6px; border-radius: 6px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+      .node { 
+        padding: 4px 6px; 
+        border-radius: 6px; 
+        display: flex; 
+        gap: 4px; 
+        align-items: center; 
+        flex-wrap: nowrap; /* Default is no wrap */
+        overflow: hidden;
+        height: 28px; /* Set fixed height for non-wrapped state */
+        box-sizing: border-box;
+      }
       .node:hover { background: var(--glass); cursor: pointer; }
       
+      .tree-container.tree-word-wrap .node {
+        flex-wrap: wrap; /* Allow wrapping when class is applied */
+        height: auto; /* Revert to auto height for wrapped state */
+      }
+
       .node-tag { color: var(--tag); font-weight: 600;}
       .node-attr-name { color: var(--attr-name); }
       .node-attr-value { color: var(--attr-value); }
@@ -159,6 +176,7 @@
       .status { font-size: 13px; color: var(--muted); }
       .error { color: var(--danger); }
       .success { color: var(--success); }
+      .warning { color: var(--warning); }
       .footer { font-size: 13px; color: var(--muted); margin-top: auto; }
       .filedrop { 
         border: 2px dashed var(--border-dashed); 
@@ -230,8 +248,9 @@
 
         <main>
             <section class="pane left">
-                <div style="display:flex; gap: 8px; align-items: center;">
-                    <input id="search" class="search" placeholder="Filter tags..." />
+                <div style="display:flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <input id="search" class="search" placeholder="Filter tags..." style="flex-grow: 1; min-width: 120px;" />
+                    <button id="btnTreeWrap" class="btn small">Wrap</button>
                     <div class="badge">Nodes: <span id="nodeCount">0</span></div>
                 </div>
                 <div class="tree-container">
@@ -299,7 +318,8 @@
                         'treeRoot', 'nodeCount', 'fileInput', 'filedrop', 'btnBeautify', 'btnValidate', 
                         'btnFormat', 'btnCopy', 'btnDownload', 'btnClear', 'search', 'editorStatus', 
                         'btnTheme', 'btnWordWrap', 'editorContainer', 'splitter', 'vizPane', 'vizMessage',
-                        'btnToggleNetwork', 'btnToggleTree', 'btnToggleValues', 'btnToggleFullscreen', 'btnCloseViz'
+                        'btnToggleNetwork', 'btnToggleTree', 'btnToggleValues', 'btnToggleFullscreen', 'btnCloseViz',
+                        'btnTreeWrap'
                     ];
                     ids.forEach(id => this.els[id] = document.getElementById(id));
                     this.els.vizSvg = d3.select("#vizSvg");
@@ -337,8 +357,15 @@
                 applyInitialSettings() {
                     const savedTheme = localStorage.getItem('xml-tool-theme') || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
                     this.applyTheme(savedTheme);
+                    
                     const savedWordWrap = localStorage.getItem('xml-tool-word-wrap') === 'true';
                     this.els.btnWordWrap.textContent = savedWordWrap ? 'No Wrap' : 'Word Wrap';
+
+                    const savedTreeWrap = localStorage.getItem('xml-tool-tree-wrap') === 'true';
+                    if (savedTreeWrap) {
+                        this.els.treeRoot.parentElement.classList.add('tree-word-wrap');
+                    }
+                    this.els.btnTreeWrap.textContent = savedTreeWrap ? 'No Wrap' : 'Wrap';
                 },
                 loadSampleData() {
                     if (!this.state.monacoEditor) return;
@@ -359,6 +386,7 @@
                     this.els.filedrop.addEventListener('drop', (e) => this.handlers.handleFileDrop(e));
                     this.els.btnTheme.addEventListener('click', () => this.handlers.handleThemeToggle());
                     this.els.btnWordWrap.addEventListener('click', () => this.handlers.handleWordWrapToggle());
+                    this.els.btnTreeWrap.addEventListener('click', () => this.handlers.handleTreeWrapToggle());
                     this.els.search.addEventListener('input', this.utils.debounce(() => this.handlers.handleSearch(), 200));
                     this.els.splitter.addEventListener('mousedown', () => { this.state.isSplitterDown = true; document.body.style.cursor = 'col-resize'; });
                     window.addEventListener('mouseup', () => { if(this.state.isSplitterDown) { this.state.isSplitterDown = false; document.body.style.cursor = 'default'; }});
@@ -398,12 +426,24 @@
                     },
                     handleFormat() {
                         if (!XMLTool.state.monacoEditor) return;
+                        const text = XMLTool.state.monacoEditor.getValue();
+                        let formattedText;
+
                         try {
-                            const xmlDoc = XMLTool.core.parseXml(XMLTool.state.monacoEditor.getValue());
-                            const formatted = XMLTool.core.formatXml(xmlDoc);
-                            XMLTool.state.monacoEditor.setValue(formatted);
-                            this.handleUpdateFromEditor();
-                        } catch (e) { /* Error already shown */ }
+                            const xmlDoc = XMLTool.core.parseXml(text);
+                            formattedText = XMLTool.core.formatXml(xmlDoc);
+                        } catch (e) {
+                            if (e.message && e.message.includes('Namespace prefix')) {
+                                XMLTool.ui.setStatus(`Warning: ${e.message}. Attempting to format anyway.`, 'warning');
+                                formattedText = XMLTool.core.formatXmlFromString(text);
+                            } else {
+                                return; // Fatal error already shown
+                            }
+                        }
+
+                        if (formattedText) {
+                            XMLTool.state.monacoEditor.setValue(formattedText);
+                        }
                     },
                     handleCopy() {
                         if (!XMLTool.state.monacoEditor) return;
@@ -461,6 +501,12 @@
                         localStorage.setItem('xml-tool-word-wrap', isEnabled);
                         XMLTool.els.btnWordWrap.textContent = isEnabled ? 'No Wrap' : 'Word Wrap';
                     },
+                    handleTreeWrapToggle() {
+                        const treeContainer = XMLTool.els.treeRoot.parentElement;
+                        const isWrapped = treeContainer.classList.toggle('tree-word-wrap');
+                        localStorage.setItem('xml-tool-tree-wrap', isWrapped);
+                        XMLTool.els.btnTreeWrap.textContent = isWrapped ? 'No Wrap' : 'Wrap';
+                    },
                     handleSearch() {
                         const query = XMLTool.els.search.value.trim().toLowerCase();
                         const nodes = Array.from(XMLTool.els.treeRoot.querySelectorAll('.node-wrapper'));
@@ -510,7 +556,10 @@
                         return xmlDoc;
                     },
                     formatXml(xmlDoc) {
-                        let xmlString = new XMLSerializer().serializeToString(xmlDoc);
+                        const xmlString = new XMLSerializer().serializeToString(xmlDoc);
+                        return this.formatXmlFromString(xmlString);
+                    },
+                    formatXmlFromString(xmlString) {
                         let formatted = '', indent = '';
                         const tab = '\t';
                         xmlString.split(/>\s*</).forEach(node => {
@@ -852,4 +901,5 @@
     </script>
 </body>
 </html>
+
 
