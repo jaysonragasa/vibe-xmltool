@@ -720,8 +720,6 @@
                         if (xmlNode.nodeType === Node.TEXT_NODE) {
                            name = `"${xmlNode.textContent.trim()}"`;
                            value = xmlNode.textContent.trim();
-                        } else if (xmlNode.attributes && xmlNode.attributes.length > 0) {
-                            name += ' ' + Array.from(xmlNode.attributes).map(a => `${a.name}="${a.value}"`).join(' ');
                         }
 
                         const item = { name, value, children: [] };
@@ -901,5 +899,4 @@
     </script>
 </body>
 </html>
-
 
