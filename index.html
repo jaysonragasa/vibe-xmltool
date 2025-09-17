@@ -143,12 +143,25 @@
         overflow: hidden;
         height: 28px; /* Set fixed height for non-wrapped state */
         box-sizing: border-box;
+        transition: background-color 0.2s;
       }
       .node:hover { background: var(--glass); cursor: pointer; }
       
       .tree-container.tree-word-wrap .node {
         flex-wrap: wrap; /* Allow wrapping when class is applied */
         height: auto; /* Revert to auto height for wrapped state */
+      }
+      
+      .node.highlighted {
+        background-color: var(--accent) !important;
+        color: white;
+      }
+       .node.highlighted .node-tag,
+       .node.highlighted .node-attr-name,
+       .node.highlighted .node-attr-value,
+       .node.highlighted .node-text,
+       .node.highlighted .node-comment {
+         color: white !important;
       }
 
       .node-tag { color: var(--tag); font-weight: 600;}
@@ -208,8 +221,13 @@
         background: var(--bg);
         overflow: hidden;
       }
-      #vizPane.fullscreen {
-        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1000; padding: 20px; box-sizing: border-box; background: var(--panel);
+      main.viz-fullscreen .editor-container,
+      main.viz-fullscreen .editor > div:nth-of-type(2) { /* div with buttons */
+          display: none;
+      }
+      main.viz-fullscreen #vizPane {
+          flex-grow: 1;
+          height: auto; /* Let flexbox handle it */
       }
       .viz-toolbar { position: absolute; top: 8px; left: 8px; z-index: 10; display: flex; gap: 8px; }
       #vizSvg { width: 100%; height: 100%; cursor: grab; }
@@ -447,6 +465,12 @@
                     this.els.btnCloseViz.addEventListener('click', () => {
                         this.state.pinnedVizNodeData = null;
                         this.visualization.showAttributes(null);
+                        
+                        const mainEl = document.querySelector('main');
+                        if (mainEl.classList.contains('viz-fullscreen')) {
+                            mainEl.classList.remove('viz-fullscreen');
+                            XMLTool.els.btnToggleFullscreen.textContent = 'Full Screen';
+                        }
                         this.visualization.hide();
                     });
                     this.els.vizAttrClose.addEventListener('click', () => {
@@ -676,6 +700,7 @@
                                 tagOccurrences[tagName] = occurrenceIndex + 1;
                                 nodeHeader.dataset.tagName = tagName;
                                 nodeHeader.dataset.occurrence = occurrenceIndex;
+                                nodeWrapper.dataset.identifier = `${tagName}-${occurrenceIndex}`;
 
                                 const tagSpan = document.createElement('span');
                                 tagSpan.className = 'node-tag';
@@ -761,6 +786,33 @@
                             monacoEditor.setSelection(selectionRange);
                             monacoEditor.focus();
                         }
+                    },
+                    highlightNode(tagName, occurrenceIndex) {
+                        const highlighted = this.container.querySelector('.node.highlighted');
+                        if (highlighted) {
+                            highlighted.classList.remove('highlighted');
+                        }
+
+                        if (tagName === null || occurrenceIndex === null) return;
+
+                        const identifier = `${tagName}-${occurrenceIndex}`;
+                        const targetNodeWrapper = this.container.querySelector(`.node-wrapper[data-identifier="${identifier}"]`);
+
+                        if (targetNodeWrapper) {
+                            let parent = targetNodeWrapper.parentElement;
+                            while (parent && parent !== this.container) {
+                                if (parent.classList.contains('node-wrapper')) {
+                                    parent.classList.remove('collapsed');
+                                }
+                                parent = parent.parentElement;
+                            }
+
+                            const nodeHeader = targetNodeWrapper.querySelector('.node');
+                            if (nodeHeader) {
+                                nodeHeader.classList.add('highlighted');
+                                nodeHeader.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                        }
                     }
                 },
                 visualization: {
@@ -780,8 +832,11 @@
                         }
                     },
                     toggleFullscreen() {
-                        const isFullscreen = XMLTool.els.vizPane.classList.toggle('fullscreen');
+                        const mainEl = document.querySelector('main');
+                        const isFullscreen = mainEl.classList.toggle('viz-fullscreen');
                         XMLTool.els.btnToggleFullscreen.textContent = isFullscreen ? 'Exit Full Screen' : 'Full Screen';
+
+                        // Rerender after a short delay to allow for CSS transition and layout reflow
                         setTimeout(() => this.render(), 100);
                     },
                     showAttributes(data) {
@@ -841,6 +896,7 @@
                         return item;
                     },
                     renderTreeLayout(xmlDoc) {
+                        if (!xmlDoc || !xmlDoc.documentElement) return;
                         const hierarchyData = this.transformXmlToHierarchy(xmlDoc.documentElement, {});
                         const root = d3.hierarchy(hierarchyData);
                         
@@ -881,6 +937,7 @@
                                 this.showAttributes(d.data);
                                 if (d.data.tagName) {
                                     XMLTool.treeView.selectNodeInEditor(d.data.tagName, d.data.occurrenceIndex);
+                                    XMLTool.treeView.highlightNode(d.data.tagName, d.data.occurrenceIndex);
                                 }
                             })
                             .on('mouseover', (event, d) => {
@@ -939,6 +996,7 @@
                         return { nodes, links };
                     },
                     renderNetworkGraph(xmlDoc) {
+                        if (!xmlDoc || !xmlDoc.documentElement) return;
                         const { nodes, links } = this.transformXmlToGraphData(xmlDoc);
                         XMLTool.els.vizSvg.selectAll("*").remove();
                         XMLTool.els.vizMessage.style.display = 'none';
@@ -1017,4 +1075,5 @@
     </script>
 </body>
 </html>
+
 
