@@ -218,6 +218,45 @@
       .node-viz circle { stroke: var(--border-light); stroke-width: 1.5px; cursor: pointer; }
       .node-viz text { fill: var(--text); font-size: 10px; pointer-events: none; }
       .values-hidden .value-text { display: none; }
+      
+      #vizAttrPane {
+        position: absolute;
+        top: 45px;
+        right: 8px;
+        width: 220px;
+        max-height: calc(100% - 53px);
+        background: var(--panel);
+        border: 1px solid var(--border-light);
+        border-radius: 6px;
+        padding: 8px;
+        display: none;
+        z-index: 20;
+        overflow-y: auto;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        font-family: 'Fira Code', monospace;
+      }
+      #vizAttrContent table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+      }
+      #vizAttrContent td {
+        padding: 4px;
+        border-bottom: 1px solid var(--border-dashed);
+        vertical-align: top;
+      }
+      #vizAttrContent tr:last-child td {
+        border-bottom: none;
+      }
+      #vizAttrContent td:first-child {
+        color: var(--attr-name);
+        font-weight: 600;
+        padding-right: 8px;
+      }
+      #vizAttrContent td:last-child {
+        color: var(--attr-value);
+        word-break: break-all;
+      }
 
       @media (max-width: 900px) {
         main { grid-template-columns: 1fr; grid-template-rows: 1fr 8px 1fr; }
@@ -279,6 +318,13 @@
                     </div>
                     <svg id="vizSvg"></svg>
                     <div id="vizMessage" class="viz-message">Load valid XML to generate a graph.</div>
+                    <div id="vizAttrPane" class="small">
+                        <div id="vizAttrHeader" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <strong>Attributes</strong>
+                            <span id="vizAttrClose" style="cursor: pointer; font-size: 16px; line-height: 1;">&times;</span>
+                        </div>
+                        <div id="vizAttrContent"></div>
+                    </div>
                 </div>
             </section>
         </main>
@@ -302,6 +348,7 @@
                     currentViz: 'none',
                     networkTransform: d3.zoomIdentity,
                     treeTransform: d3.zoomIdentity,
+                    pinnedVizNodeData: null
                 },
                 icons: {
                     sun: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`,
@@ -319,7 +366,7 @@
                         'btnFormat', 'btnCopy', 'btnDownload', 'btnClear', 'search', 'editorStatus', 
                         'btnTheme', 'btnWordWrap', 'editorContainer', 'splitter', 'vizPane', 'vizMessage',
                         'btnToggleNetwork', 'btnToggleTree', 'btnToggleValues', 'btnToggleFullscreen', 'btnCloseViz',
-                        'btnTreeWrap'
+                        'btnTreeWrap', 'vizAttrPane', 'vizAttrContent', 'vizAttrClose'
                     ];
                     ids.forEach(id => this.els[id] = document.getElementById(id));
                     this.els.vizSvg = d3.select("#vizSvg");
@@ -339,7 +386,6 @@
                             scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 }
                         });
 
-                        // Manually handle layout changes to avoid ResizeObserver errors
                         const editorContainer = this.els.editorContainer;
                         const debouncedLayout = this.utils.debounce(() => {
                             if (this.state.monacoEditor) {
@@ -392,10 +438,19 @@
                     window.addEventListener('mouseup', () => { if(this.state.isSplitterDown) { this.state.isSplitterDown = false; document.body.style.cursor = 'default'; }});
                     window.addEventListener('mousemove', (e) => this.handlers.handleSplitterMove(e));
                     window.addEventListener('keydown', (e) => this.handlers.handleKeyDown(e));
+                    
                     // Visualization events
                     this.els.btnToggleNetwork.addEventListener('click', () => this.visualization.show('network'));
                     this.els.btnToggleTree.addEventListener('click', () => this.visualization.show('tree'));
-                    this.els.btnCloseViz.addEventListener('click', () => this.visualization.hide());
+                    this.els.btnCloseViz.addEventListener('click', () => {
+                        this.state.pinnedVizNodeData = null;
+                        this.visualization.showAttributes(null);
+                        this.visualization.hide();
+                    });
+                    this.els.vizAttrClose.addEventListener('click', () => {
+                         this.state.pinnedVizNodeData = null;
+                         this.visualization.showAttributes(null);
+                    });
                     this.els.btnToggleValues.addEventListener('click', () => this.els.vizSvg.node().classList.toggle('values-hidden'));
                     this.els.btnToggleFullscreen.addEventListener('click', () => this.visualization.toggleFullscreen());
                 },
@@ -635,7 +690,6 @@
 
                             nodeWrapper.appendChild(nodeHeader);
                             
-                            // Add listener to the whole node for selection
                             nodeHeader.addEventListener('click', () => {
                                 if (xmlNode.nodeType === Node.ELEMENT_NODE) {
                                     this.selectNodeInEditor(nodeHeader.dataset.tagName, parseInt(nodeHeader.dataset.occurrence, 10));
@@ -651,7 +705,6 @@
                                 });
                                 nodeWrapper.appendChild(childrenList);
                                 
-                                // Add click listener to the expander icon ONLY
                                 const toggler = nodeHeader.querySelector('.toggler');
                                 if(toggler) {
                                     toggler.addEventListener('click', (e) => {
@@ -669,7 +722,7 @@
                                 this.container.appendChild(rootElement);
                             }
                         }
-                        XMLTool.els.nodeCount.textContent = count > 0 ? count - 1 : 0; // Adjust for root
+                        XMLTool.els.nodeCount.textContent = count > 0 ? count - 1 : 0;
                     },
                     selectNodeInEditor(tagName, occurrenceIndex) {
                         const { monacoEditor } = XMLTool.state;
@@ -711,27 +764,54 @@
                         XMLTool.els.btnToggleFullscreen.textContent = isFullscreen ? 'Exit Full Screen' : 'Full Screen';
                         setTimeout(() => this.render(), 100);
                     },
-                    transformXmlToHierarchy(xmlNode) {
+                    showAttributes(data) {
+                        const { vizAttrPane, vizAttrContent } = XMLTool.els;
+                        if (data && data.attributes && Object.keys(data.attributes).length > 0) {
+                            let html = '<table>';
+                            for (const [key, value] of Object.entries(data.attributes)) {
+                                html += `<tr><td>${key}</td><td>${value}</td></tr>`;
+                            }
+                            html += '</table>';
+                            vizAttrContent.innerHTML = html;
+                            vizAttrPane.style.display = 'block';
+                        } else {
+                            vizAttrPane.style.display = 'none';
+                            vizAttrContent.innerHTML = '';
+                        }
+                    },
+                    transformXmlToHierarchy(xmlNode, tagOccurrences) {
                         if (!xmlNode || xmlNode.nodeType === Node.COMMENT_NODE) return null;
                         if (xmlNode.nodeType === Node.TEXT_NODE && !xmlNode.textContent.trim()) return null;
 
                         let name = xmlNode.nodeName;
                         let value = '';
+                        const attributes = {};
+                        let tagName = null;
+                        let occurrenceIndex = null;
+
                         if (xmlNode.nodeType === Node.TEXT_NODE) {
                            name = `"${xmlNode.textContent.trim()}"`;
                            value = xmlNode.textContent.trim();
+                        } else if (xmlNode.nodeType === Node.ELEMENT_NODE) {
+                             tagName = xmlNode.nodeName;
+                             occurrenceIndex = (tagOccurrences[tagName] || 0);
+                             tagOccurrences[tagName] = occurrenceIndex + 1;
+                             if (xmlNode.attributes) {
+                                 for (const attr of xmlNode.attributes) {
+                                    attributes[attr.name] = attr.value;
+                                }
+                            }
                         }
 
-                        const item = { name, value, children: [] };
+                        const item = { name, value, attributes, tagName, occurrenceIndex, children: [] };
                         
                         if (xmlNode.childNodes && xmlNode.childNodes.length > 0) {
                            xmlNode.childNodes.forEach(child => {
-                               const childItem = this.transformXmlToHierarchy(child);
+                               const childItem = this.transformXmlToHierarchy(child, tagOccurrences);
                                if (childItem) item.children.push(childItem);
                            });
                         }
                         
-                        // If a node only has one text child, treat it as a value, not a child branch
                         if(item.children.length === 1 && item.children[0].value) {
                              item.value = item.children[0].value;
                              item.name += `: ${item.value}`;
@@ -741,7 +821,7 @@
                         return item;
                     },
                     renderTreeLayout(xmlDoc) {
-                        const hierarchyData = this.transformXmlToHierarchy(xmlDoc.documentElement);
+                        const hierarchyData = this.transformXmlToHierarchy(xmlDoc.documentElement, {});
                         const root = d3.hierarchy(hierarchyData);
                         
                         XMLTool.els.vizSvg.selectAll("*").remove();
@@ -762,6 +842,10 @@
 
                         const container = XMLTool.els.vizSvg
                             .attr("viewBox", [-dy / 1.5, x0 - dx, width + dy, height])
+                            .on('click', () => {
+                                XMLTool.state.pinnedVizNodeData = null;
+                                this.showAttributes(null);
+                            })
                             .append("g");
 
                         container.append('g').selectAll('path').data(root.links()).enter().append('path')
@@ -770,7 +854,21 @@
 
                         const node = container.append('g').selectAll('g').data(root.descendants()).enter().append('g')
                             .attr('class', 'node-viz') 
-                            .attr('transform', d => `translate(${d.y},${d.x})`);
+                            .attr('transform', d => `translate(${d.y},${d.x})`)
+                            .on('click', (event, d) => {
+                                event.stopPropagation();
+                                XMLTool.state.pinnedVizNodeData = d.data;
+                                this.showAttributes(d.data);
+                                if (d.data.tagName) {
+                                    XMLTool.treeView.selectNodeInEditor(d.data.tagName, d.data.occurrenceIndex);
+                                }
+                            })
+                            .on('mouseover', (event, d) => {
+                                this.showAttributes(d.data);
+                            })
+                            .on('mouseout', () => {
+                                this.showAttributes(XMLTool.state.pinnedVizNodeData);
+                            });
 
                         node.append('circle').attr('r', 6).style("fill", d => d.children && d.children.length ? 'var(--accent)' : 'var(--success)');
                         const text = node.append('text').attr('dy', '0.31em').attr('x', d => d.children && d.children.length ? -12 : 12).attr('text-anchor', d => d.children && d.children.length ? 'end' : 'start');
@@ -899,4 +997,5 @@
     </script>
 </body>
 </html>
+
 
