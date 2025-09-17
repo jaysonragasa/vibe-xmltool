@@ -307,6 +307,7 @@
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <button id="btnBeautify" class="btn primary">Format</button>
+                    <button id="btnMinify" class="btn">Minify</button>
                     <button id="btnClear" class="btn">Clear</button>
                     <div style="margin-left:auto" class="status" id="editorStatus"></div>
                 </div>
@@ -366,7 +367,7 @@
                         'btnFormat', 'btnCopy', 'btnDownload', 'btnClear', 'search', 'editorStatus', 
                         'btnTheme', 'btnWordWrap', 'editorContainer', 'splitter', 'vizPane', 'vizMessage',
                         'btnToggleNetwork', 'btnToggleTree', 'btnToggleValues', 'btnToggleFullscreen', 'btnCloseViz',
-                        'btnTreeWrap', 'vizAttrPane', 'vizAttrContent', 'vizAttrClose'
+                        'btnTreeWrap', 'vizAttrPane', 'vizAttrContent', 'vizAttrClose', 'btnMinify'
                     ];
                     ids.forEach(id => this.els[id] = document.getElementById(id));
                     this.els.vizSvg = d3.select("#vizSvg");
@@ -423,6 +424,7 @@
                     this.els.btnValidate.addEventListener('click', () => this.handlers.handleUpdateFromEditor());
                     this.els.btnFormat.addEventListener('click', () => this.handlers.handleFormat());
                     this.els.btnBeautify.addEventListener('click', () => this.handlers.handleFormat());
+                    this.els.btnMinify.addEventListener('click', () => this.handlers.handleMinify());
                     this.els.btnCopy.addEventListener('click', () => this.handlers.handleCopy());
                     this.els.btnDownload.addEventListener('click', () => this.handlers.handleDownload());
                     this.els.btnClear.addEventListener('click', () => this.handlers.handleClear());
@@ -498,6 +500,21 @@
 
                         if (formattedText) {
                             XMLTool.state.monacoEditor.setValue(formattedText);
+                        }
+                    },
+                    handleMinify() {
+                        if (!XMLTool.state.monacoEditor) return;
+                        const text = XMLTool.state.monacoEditor.getValue();
+                        if (!text.trim()) return;
+
+                        try {
+                            // First validate it to make sure we don't minify broken XML
+                            XMLTool.core.parseXml(text); 
+                            const minifiedText = XMLTool.core.minifyXml(text);
+                            XMLTool.state.monacoEditor.setValue(minifiedText);
+                            XMLTool.ui.setStatus('XML Minified', 'success');
+                        } catch (e) {
+                            // Error is already displayed by parseXml
                         }
                     },
                     handleCopy() {
@@ -623,6 +640,9 @@
                             if (node.match(/^<?\w[^>]*[^\/]$/)) indent += tab;
                         });
                         return formatted.substring(1, formatted.length - 3);
+                    },
+                    minifyXml(xmlString) {
+                        return xmlString.replace(/>\s*</g, '><').replace(/(\r\n|\n|\r|\t)/gm, "").trim();
                     }
                 },
                 treeView: {
@@ -997,5 +1017,4 @@
     </script>
 </body>
 </html>
-
 
