@@ -92,6 +92,7 @@
       }
       .btn:hover { background: var(--border-light); color: var(--text); }
       .btn.primary { background: linear-gradient(90deg, var(--gradient-start), var(--gradient-end)); color: white; border: none; }
+      .btn.active { border-color: var(--accent); color: var(--accent); background: var(--border-light); }
       
       main {
         display: grid;
@@ -181,7 +182,6 @@
           margin-right: 4px;
           transition: transform 0.15s ease;
           flex-shrink: 0;
-          cursor: pointer;
       }
       .node-wrapper:not(.collapsed) .toggler { transform: rotate(90deg); }
 
@@ -227,7 +227,7 @@
       }
       main.viz-fullscreen #vizPane {
           flex-grow: 1;
-          height: auto; /* Let flexbox handle it */
+          height: auto;
       }
       .viz-toolbar { position: absolute; top: 8px; left: 8px; z-index: 10; display: flex; gap: 8px; }
       #vizSvg { width: 100%; height: 100%; cursor: grab; }
@@ -297,6 +297,7 @@
                 <button id="btnDownload" class="btn">Download</button>
                 <button id="btnCopy" class="btn">Copy</button>
                 <button id="btnWordWrap" class="btn">Word Wrap</button>
+                <button id="btnAttrLine" class="btn">Attr per line</button>
                 <button id="btnToggleNetwork" class="btn">Network Graph</button>
                 <button id="btnToggleTree" class="btn">Tree Layout</button>
                 <button id="btnTheme" class="btn"></button>
@@ -355,9 +356,6 @@
     <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.33.0/min/vs/loader.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            /**
-             * Main application module for the XML Tool.
-             */
             const XMLTool = {
                 els: {},
                 state: {
@@ -367,7 +365,8 @@
                     currentViz: 'none',
                     networkTransform: d3.zoomIdentity,
                     treeTransform: d3.zoomIdentity,
-                    pinnedVizNodeData: null
+                    pinnedVizNodeData: null,
+                    attrPerLine: false
                 },
                 icons: {
                     sun: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`,
@@ -385,7 +384,7 @@
                         'btnFormat', 'btnCopy', 'btnDownload', 'btnClear', 'search', 'editorStatus', 
                         'btnTheme', 'btnWordWrap', 'editorContainer', 'splitter', 'vizPane', 'vizMessage',
                         'btnToggleNetwork', 'btnToggleTree', 'btnToggleValues', 'btnToggleFullscreen', 'btnCloseViz',
-                        'btnTreeWrap', 'vizAttrPane', 'vizAttrContent', 'vizAttrClose', 'btnMinify'
+                        'btnTreeWrap', 'vizAttrPane', 'vizAttrContent', 'vizAttrClose', 'btnMinify', 'btnAttrLine'
                     ];
                     ids.forEach(id => this.els[id] = document.getElementById(id));
                     this.els.vizSvg = d3.select("#vizSvg");
@@ -399,7 +398,7 @@
                         this.state.monacoEditor = monaco.editor.create(document.getElementById('editor'), {
                             language: 'xml',
                             theme: savedTheme === 'light' ? 'vs' : 'vs-dark',
-                            automaticLayout: false, // Set to false to manually handle layout
+                            automaticLayout: false,
                             wordWrap: savedWordWrap ? 'on' : 'off',
                             minimap: { enabled: false },
                             scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 }
@@ -431,10 +430,14 @@
                         this.els.treeRoot.parentElement.classList.add('tree-word-wrap');
                     }
                     this.els.btnTreeWrap.textContent = savedTreeWrap ? 'No Wrap' : 'Wrap';
+
+                    const savedAttrLine = localStorage.getItem('xml-tool-attr-line') === 'true';
+                    this.state.attrPerLine = savedAttrLine;
+                    if (savedAttrLine) this.els.btnAttrLine.classList.add('active');
                 },
                 loadSampleData() {
                     if (!this.state.monacoEditor) return;
-                    const sample = `<root>\n  <!-- This is a sample XML document -->\n  <items count="2">\n    <item id="i1">\n      <name>First Item</name>\n      <value>100</value>\n    </item>\n    <item id="i2">\n      <name>Second Item</name>\n      <value>200</value>\n    </item>\n  </items>\n</root>`;
+                    const sample = `<root>\n  <!-- This is a sample XML document -->\n  <items count="2" category="testing">\n    <item id="i1" status="active" priority="high">\n      <name>First Item</name>\n      <value>100</value>\n    </item>\n    <item id="i2" status="pending" priority="medium">\n      <name>Second Item</name>\n      <value>200</value>\n    </item>\n  </items>\n</root>`;
                     this.state.monacoEditor.setValue(sample);
                     this.handlers.handleUpdateFromEditor();
                 },
@@ -453,19 +456,18 @@
                     this.els.btnTheme.addEventListener('click', () => this.handlers.handleThemeToggle());
                     this.els.btnWordWrap.addEventListener('click', () => this.handlers.handleWordWrapToggle());
                     this.els.btnTreeWrap.addEventListener('click', () => this.handlers.handleTreeWrapToggle());
+                    this.els.btnAttrLine.addEventListener('click', () => this.handlers.handleAttrLineToggle());
                     this.els.search.addEventListener('input', this.utils.debounce(() => this.handlers.handleSearch(), 200));
                     this.els.splitter.addEventListener('mousedown', () => { this.state.isSplitterDown = true; document.body.style.cursor = 'col-resize'; });
                     window.addEventListener('mouseup', () => { if(this.state.isSplitterDown) { this.state.isSplitterDown = false; document.body.style.cursor = 'default'; }});
                     window.addEventListener('mousemove', (e) => this.handlers.handleSplitterMove(e));
                     window.addEventListener('keydown', (e) => this.handlers.handleKeyDown(e));
                     
-                    // Visualization events
                     this.els.btnToggleNetwork.addEventListener('click', () => this.visualization.show('network'));
                     this.els.btnToggleTree.addEventListener('click', () => this.visualization.show('tree'));
                     this.els.btnCloseViz.addEventListener('click', () => {
                         this.state.pinnedVizNodeData = null;
                         this.visualization.showAttributes(null);
-                        
                         const mainEl = document.querySelector('main');
                         if (mainEl.classList.contains('viz-fullscreen')) {
                             mainEl.classList.remove('viz-fullscreen');
@@ -512,13 +514,13 @@
 
                         try {
                             const xmlDoc = XMLTool.core.parseXml(text);
-                            formattedText = XMLTool.core.formatXml(xmlDoc);
+                            formattedText = XMLTool.core.formatXml(xmlDoc, XMLTool.state.attrPerLine);
                         } catch (e) {
                             if (e.message && e.message.includes('Namespace prefix')) {
                                 XMLTool.ui.setStatus(`Warning: ${e.message}. Attempting to format anyway.`, 'warning');
-                                formattedText = XMLTool.core.formatXmlFromString(text);
+                                formattedText = XMLTool.core.formatXmlFromString(text, XMLTool.state.attrPerLine);
                             } else {
-                                return; // Fatal error already shown
+                                return;
                             }
                         }
 
@@ -530,16 +532,12 @@
                         if (!XMLTool.state.monacoEditor) return;
                         const text = XMLTool.state.monacoEditor.getValue();
                         if (!text.trim()) return;
-
                         try {
-                            // First validate it to make sure we don't minify broken XML
                             XMLTool.core.parseXml(text); 
                             const minifiedText = XMLTool.core.minifyXml(text);
                             XMLTool.state.monacoEditor.setValue(minifiedText);
                             XMLTool.ui.setStatus('XML Minified', 'success');
-                        } catch (e) {
-                            // Error is already displayed by parseXml
-                        }
+                        } catch (e) {}
                     },
                     handleCopy() {
                         if (!XMLTool.state.monacoEditor) return;
@@ -603,6 +601,12 @@
                         localStorage.setItem('xml-tool-tree-wrap', isWrapped);
                         XMLTool.els.btnTreeWrap.textContent = isWrapped ? 'No Wrap' : 'Wrap';
                     },
+                    handleAttrLineToggle() {
+                        const isActive = !XMLTool.state.attrPerLine;
+                        XMLTool.state.attrPerLine = isActive;
+                        XMLTool.els.btnAttrLine.classList.toggle('active', isActive);
+                        localStorage.setItem('xml-tool-attr-line', isActive);
+                    },
                     handleSearch() {
                         const query = XMLTool.els.search.value.trim().toLowerCase();
                         const nodes = Array.from(XMLTool.els.treeRoot.querySelectorAll('.node-wrapper'));
@@ -644,26 +648,66 @@
                         const xmlDoc = parser.parseFromString(text, "application/xml");
                         const errorNode = xmlDoc.querySelector("parsererror");
                         if (errorNode) {
-                            const errorMsg = errorNode.textContent.split('\n')[1] || 'Invalid XML structure';
+                            // Extract actual error description and clean generic browser text
+                            let errorMsg = errorNode.textContent.replace(/Below is a rendering.*/s, "").trim();
+                            if (!errorMsg) errorMsg = 'Invalid XML structure';
+                            
                             XMLTool.ui.setStatus(`Invalid XML: ${errorMsg}`, 'error');
                             throw new Error(errorMsg);
                         }
                         XMLTool.ui.setStatus('Valid XML', 'success');
                         return xmlDoc;
                     },
-                    formatXml(xmlDoc) {
+                    formatXml(xmlDoc, attrPerLine) {
                         const xmlString = new XMLSerializer().serializeToString(xmlDoc);
-                        return this.formatXmlFromString(xmlString);
+                        return this.formatXmlFromString(xmlString, attrPerLine);
                     },
-                    formatXmlFromString(xmlString) {
+                    formatXmlFromString(xmlString, attrPerLine) {
                         let formatted = '', indent = '';
                         const tab = '\t';
-                        xmlString.split(/>\s*</).forEach(node => {
-                            if (node.match(/^\/\w/)) indent = indent.substring(tab.length);
-                            formatted += indent + '<' + node + '>\r\n';
-                            if (node.match(/^<?\w[^>]*[^\/]$/)) indent += tab;
+                        xmlString = xmlString.replace(/>\s*</g, '><');
+                        const tokens = xmlString.split(/(?=<)|(?<=>)/);
+
+                        tokens.forEach(token => {
+                            if (!token.trim()) return;
+
+                            if (token.startsWith('</')) {
+                                indent = indent.substring(tab.length);
+                                formatted += indent + token + '\r\n';
+                            } else if (token.startsWith('<!--')) {
+                                formatted += indent + token + '\r\n';
+                            } else if (token.startsWith('<')) {
+                                let tagContent = token;
+                                const isSelfClosing = tagContent.endsWith('/>');
+                                const tagMatch = tagContent.match(/^<([^\s/>]+)([^>]*?)(\/?>)$/);
+
+                                if (tagMatch) {
+                                    const tagName = tagMatch[1];
+                                    const attrsPart = tagMatch[2].trim();
+                                    const closing = tagMatch[3];
+
+                                    if (attrPerLine && attrsPart) {
+                                        const attrRegex = /([^\s=]+)\s*=\s*("[^"]*"|'[^']*')/g;
+                                        let m;
+                                        const attrs = [];
+                                        while ((m = attrRegex.exec(attrsPart)) !== null) {
+                                            attrs.push(`${m[1]}=${m[2]}`);
+                                        }
+                                        if (attrs.length > 0) {
+                                            tagContent = `<${tagName}\n${indent}${tab}${attrs.join('\n' + indent + tab)}${closing}`;
+                                        }
+                                    }
+                                }
+
+                                formatted += indent + tagContent + '\r\n';
+                                if (!isSelfClosing && !token.startsWith('<?')) {
+                                    indent += tab;
+                                }
+                            } else {
+                                formatted += indent + token.trim() + '\r\n';
+                            }
                         });
-                        return formatted.substring(1, formatted.length - 3);
+                        return formatted.trim();
                     },
                     minifyXml(xmlString) {
                         return xmlString.replace(/>\s*</g, '><').replace(/(\r\n|\n|\r|\t)/gm, "").trim();
@@ -730,11 +774,10 @@
                                 textSpan.textContent = xmlNode.textContent.trim();
                                 nodeHeader.appendChild(textSpan);
                             } else {
-                                return null; // Skip empty text nodes
+                                return null; 
                             }
 
                             nodeWrapper.appendChild(nodeHeader);
-                            
                             nodeHeader.addEventListener('click', () => {
                                 if (xmlNode.nodeType === Node.ELEMENT_NODE) {
                                     this.selectNodeInEditor(nodeHeader.dataset.tagName, parseInt(nodeHeader.dataset.occurrence, 10));
@@ -749,7 +792,6 @@
                                     if (childElement) childrenList.appendChild(childElement);
                                 });
                                 nodeWrapper.appendChild(childrenList);
-                                
                                 const toggler = nodeHeader.querySelector('.toggler');
                                 if(toggler) {
                                     toggler.addEventListener('click', (e) => {
@@ -772,13 +814,10 @@
                     selectNodeInEditor(tagName, occurrenceIndex) {
                         const { monacoEditor } = XMLTool.state;
                         if (!monacoEditor) return;
-
                         const model = monacoEditor.getModel();
                         if (!model) return;
-
                         const searchString = `<${tagName}`;
                         const matches = model.findMatches(searchString, true, false, true, null, true);
-
                         if (matches[occurrenceIndex]) {
                             const range = matches[occurrenceIndex].range;
                             const selectionRange = new monaco.Range(range.startLineNumber, range.startColumn + 1, range.startLineNumber, range.startColumn + 1 + tagName.length);
@@ -792,12 +831,9 @@
                         if (highlighted) {
                             highlighted.classList.remove('highlighted');
                         }
-
                         if (tagName === null || occurrenceIndex === null) return;
-
                         const identifier = `${tagName}-${occurrenceIndex}`;
                         const targetNodeWrapper = this.container.querySelector(`.node-wrapper[data-identifier="${identifier}"]`);
-
                         if (targetNodeWrapper) {
                             let parent = targetNodeWrapper.parentElement;
                             while (parent && parent !== this.container) {
@@ -806,7 +842,6 @@
                                 }
                                 parent = parent.parentElement;
                             }
-
                             const nodeHeader = targetNodeWrapper.querySelector('.node');
                             if (nodeHeader) {
                                 nodeHeader.classList.add('highlighted');
@@ -835,8 +870,6 @@
                         const mainEl = document.querySelector('main');
                         const isFullscreen = mainEl.classList.toggle('viz-fullscreen');
                         XMLTool.els.btnToggleFullscreen.textContent = isFullscreen ? 'Exit Full Screen' : 'Full Screen';
-
-                        // Rerender after a short delay to allow for CSS transition and layout reflow
                         setTimeout(() => this.render(), 100);
                     },
                     showAttributes(data) {
@@ -857,13 +890,11 @@
                     transformXmlToHierarchy(xmlNode, tagOccurrences) {
                         if (!xmlNode || xmlNode.nodeType === Node.COMMENT_NODE) return null;
                         if (xmlNode.nodeType === Node.TEXT_NODE && !xmlNode.textContent.trim()) return null;
-
                         let name = xmlNode.nodeName;
                         let value = '';
                         const attributes = {};
                         let tagName = null;
                         let occurrenceIndex = null;
-
                         if (xmlNode.nodeType === Node.TEXT_NODE) {
                            name = `"${xmlNode.textContent.trim()}"`;
                            value = xmlNode.textContent.trim();
@@ -877,45 +908,36 @@
                                 }
                             }
                         }
-
                         const item = { name, value, attributes, tagName, occurrenceIndex, children: [] };
-                        
                         if (xmlNode.childNodes && xmlNode.childNodes.length > 0) {
                            xmlNode.childNodes.forEach(child => {
                                const childItem = this.transformXmlToHierarchy(child, tagOccurrences);
                                if (childItem) item.children.push(childItem);
                            });
                         }
-                        
                         if(item.children.length === 1 && item.children[0].value) {
                              item.value = item.children[0].value;
                              item.name += `: ${item.value}`;
                              item.children = [];
                         }
-
                         return item;
                     },
                     renderTreeLayout(xmlDoc) {
                         if (!xmlDoc || !xmlDoc.documentElement) return;
                         const hierarchyData = this.transformXmlToHierarchy(xmlDoc.documentElement, {});
                         const root = d3.hierarchy(hierarchyData);
-                        
                         XMLTool.els.vizSvg.selectAll("*").remove();
                         XMLTool.els.vizMessage.style.display = 'none';
-
                         const dx = 40, dy = 220;
                         const treeLayout = d3.tree().nodeSize([dx, dy]);
                         treeLayout(root);
-
                         let x0 = Infinity, x1 = -x0;
                         root.each(d => {
                             if (d.x > x1) x1 = d.x;
                             if (d.x < x0) x0 = d.x;
                         });
-
                         const height = x1 - x0 + dx * 2;
                         const width = (root.height + 1) * dy;
-
                         const container = XMLTool.els.vizSvg
                             .attr("viewBox", [-dy / 1.5, x0 - dx, width + dy, height])
                             .on('click', () => {
@@ -923,11 +945,9 @@
                                 this.showAttributes(null);
                             })
                             .append("g");
-
                         container.append('g').selectAll('path').data(root.links()).enter().append('path')
                             .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
                             .attr("class", "link");
-
                         const node = container.append('g').selectAll('g').data(root.descendants()).enter().append('g')
                             .attr('class', 'node-viz') 
                             .attr('transform', d => `translate(${d.y},${d.x})`)
@@ -946,11 +966,9 @@
                             .on('mouseout', () => {
                                 this.showAttributes(XMLTool.state.pinnedVizNodeData);
                             });
-
                         node.append('circle').attr('r', 6).style("fill", d => d.children && d.children.length ? 'var(--accent)' : 'var(--success)');
                         const text = node.append('text').attr('dy', '0.31em').attr('x', d => d.children && d.children.length ? -12 : 12).attr('text-anchor', d => d.children && d.children.length ? 'end' : 'start');
                         text.append("tspan").text(d => d.data.name);
-                        
                         const zoom = d3.zoom().scaleExtent([0.1, Infinity]).on("zoom", (event) => {
                             container.attr("transform", event.transform);
                             XMLTool.state.treeTransform = event.transform;
@@ -960,25 +978,20 @@
                     transformXmlToGraphData(xmlDoc) {
                         const nodes = [], links = [];
                         let idCounter = 0;
-
                         function traverse(xmlNode, parentId) {
                             if (!xmlNode || xmlNode.nodeType === Node.COMMENT_NODE) return;
                             if (xmlNode.nodeType === Node.TEXT_NODE && !xmlNode.textContent.trim()) return;
-                            
                             const nodeId = idCounter++;
                             let name = xmlNode.nodeName;
                             let value = '';
                             let type = 'element';
-                            
                             if (xmlNode.nodeType === Node.TEXT_NODE) {
                                 name = `Text`;
                                 value = `: "${xmlNode.textContent.trim()}"`;
                                 type = 'value';
                             }
-
                             nodes.push({ id: nodeId, key: name, value: value, type });
                             if (parentId !== null) links.push({ source: parentId, target: nodeId });
-
                             if(xmlNode.attributes) {
                                 for(const attr of xmlNode.attributes){
                                     const attrId = idCounter++;
@@ -986,12 +999,10 @@
                                     links.push({ source: nodeId, target: attrId });
                                 }
                             }
-
                             if (xmlNode.childNodes) {
                                 xmlNode.childNodes.forEach(child => traverse(child, nodeId));
                             }
                         }
-
                         traverse(xmlDoc.documentElement, null);
                         return { nodes, links };
                     },
@@ -1000,42 +1011,35 @@
                         const { nodes, links } = this.transformXmlToGraphData(xmlDoc);
                         XMLTool.els.vizSvg.selectAll("*").remove();
                         XMLTool.els.vizMessage.style.display = 'none';
-
                         if (!nodes.length) {
                             XMLTool.els.vizMessage.textContent = 'No data to visualize.';
                             XMLTool.els.vizMessage.style.display = 'block';
                             return;
                         }
-
                         const width = XMLTool.els.vizPane.clientWidth, height = XMLTool.els.vizPane.clientHeight;
                         const simulation = d3.forceSimulation(nodes)
                             .force("link", d3.forceLink(links).id(d => d.id).distance(60))
                             .force("charge", d3.forceManyBody().strength(-150))
                             .force("center", d3.forceCenter(width / 2, height / 2));
-
                         const container = XMLTool.els.vizSvg.append("g");
                         const link = container.append("g").selectAll("line").data(links).enter().append("line").attr("class", "link");
                         const node = container.append("g").selectAll("g").data(nodes).enter().append("g")
                             .attr("class", "node-viz")
                             .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended));
-
                         node.append("circle").attr("r", d => d.type === 'value' ? 4 : (d.type === 'attribute' ? 5 : 8))
                             .style("fill", d => ({'element': 'var(--accent)', 'attribute': 'var(--muted)', 'value': 'var(--success)'}[d.type]));
                         const text = node.append("text").attr("x", 12).attr("dy", ".35em");
                         text.append("tspan").text(d => d.key);
                         text.append("tspan").attr("class", "value-text").text(d => d.value);
-
                         simulation.on("tick", () => {
                             link.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
                             node.attr("transform", d => `translate(${d.x},${d.y})`);
                         });
-                        
                         const zoom = d3.zoom().scaleExtent([0.1, Infinity]).on("zoom", (event) => {
                             container.attr("transform", event.transform);
                             XMLTool.state.networkTransform = event.transform;
                         });
                         XMLTool.els.vizSvg.call(zoom).call(zoom.transform, XMLTool.state.networkTransform);
-
                         function dragstarted(event, d) { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
                         function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
                         function dragended(event, d) { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
@@ -1069,11 +1073,8 @@
                     localStorage.setItem('xml-tool-theme', theme);
                 }
             };
-
             XMLTool.init();
         });
     </script>
 </body>
 </html>
-
-
