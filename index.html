@@ -398,7 +398,7 @@
                         this.state.monacoEditor = monaco.editor.create(document.getElementById('editor'), {
                             language: 'xml',
                             theme: savedTheme === 'light' ? 'vs' : 'vs-dark',
-                            automaticLayout: false,
+                            automaticLayout: false, // Set to false to manually handle layout
                             wordWrap: savedWordWrap ? 'on' : 'off',
                             minimap: { enabled: false },
                             scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 }
@@ -606,6 +606,9 @@
                         XMLTool.state.attrPerLine = isActive;
                         XMLTool.els.btnAttrLine.classList.toggle('active', isActive);
                         localStorage.setItem('xml-tool-attr-line', isActive);
+                        
+                        // Automatically reformat code to apply the attribute-per-line change
+                        this.handleFormat();
                     },
                     handleSearch() {
                         const query = XMLTool.els.search.value.trim().toLowerCase();
@@ -648,10 +651,8 @@
                         const xmlDoc = parser.parseFromString(text, "application/xml");
                         const errorNode = xmlDoc.querySelector("parsererror");
                         if (errorNode) {
-                            // Extract actual error description and clean generic browser text
                             let errorMsg = errorNode.textContent.replace(/Below is a rendering.*/s, "").trim();
                             if (!errorMsg) errorMsg = 'Invalid XML structure';
-                            
                             XMLTool.ui.setStatus(`Invalid XML: ${errorMsg}`, 'error');
                             throw new Error(errorMsg);
                         }
